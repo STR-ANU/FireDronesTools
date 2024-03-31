@@ -6,7 +6,7 @@ parser = argparse.ArgumentParser(description='Create thermal video')
 parser.add_argument('dir', default=None, help='thermal directory')
 parser.add_argument('output', default=None, help='output video')
 parser.add_argument('--fps', type=int, default=1, help='frame rate')
-parser.add_argument('--temp-min', type=float, default=20, help='min temperature')
+parser.add_argument('--temp-min', type=float, default=10, help='min temperature')
 parser.add_argument('--temp-max', type=float, default=150, help='max temperature')
 args = parser.parse_args()
 
@@ -78,7 +78,7 @@ def load_thermal_colormap(fname, tmin, tmax):
     a = (a - tmin) / float(tmax - tmin)
     a = a.reshape(height, width)
 
-    rgb = plt.cm.hot(a)
+    rgb = plt.cm.inferno(a)
     rgb_image = (rgb[..., :3] * 255).astype(np.uint8)
 
     return rgb_image
@@ -104,7 +104,7 @@ for image in images:
 
     print("Loading %s (%u/%u) for %.3fs" % (image_path, done, len(images), duration))
     done += 1
-    rgb = load_thermal_colormap(image_path, min_temp, max_temp)
+    rgb = load_thermal_colormap(image, min_temp, max_temp)
 
     clip = ImageClip(rgb, duration=duration)
     clips.append(clip)
