@@ -244,18 +244,22 @@ def overlay_videos(rgb, thermal, flight_state, output, duration):
         output
     ])
 
-    # set mtime to mtime of rgb
-    mtime = os.path.getmtime(rgb)
-    os.utime(output, (mtime, mtime))
-
 def make_rbg_video():
     '''make the rgb video concatenating all RGB videos'''
     videos = sorted_files(os.path.join(args.flight_dir, RGB_DIR))
     if len(videos) <= 1:
         return videos[0]
+    first_duration = VideoFileClip(videos[0]).duration
+    start_time = os.path.getmtime(videos[0]) - first_duration
     rgb_tmp = output_base + "_rgb_tmp.mp4"
     print("Concatenating %u RGB videos" % len(videos))
     concatenate_videos(videos, rgb_tmp, duration=args.duration)
+
+    # fixup mtime
+    duration = VideoFileClip(rgb_tmp).duration
+    end_time = start_time + duration
+    os.utime(rgb_tmp, (end_time, end_time))
+    
     return rgb_tmp
 
 # get the base name of the output file for temporary files
