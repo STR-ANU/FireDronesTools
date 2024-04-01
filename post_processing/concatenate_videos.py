@@ -16,6 +16,7 @@ def concatenate_videos(video_files, output_file):
     # Call ffmpeg to concatenate the videos using the temporary file list
     subprocess.run([
         'ffmpeg',
+        '-y',
         '-f', 'concat',
         '-safe', '0',
         '-i', flist,
@@ -23,6 +24,11 @@ def concatenate_videos(video_files, output_file):
         output_file
     ])
     os.unlink(flist)
+
+    # set mtime to mtime of last file, so start time can be predicted from mtime
+    last_mtime = os.path.getmtime(video_files[-1])
+    os.utime(output_file, (last_mtime, last_mtime))
+
 
 
 parser = argparse.ArgumentParser(description="Concatenate multiple MP4 videos into a single video file using ffmpeg.")
