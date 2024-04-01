@@ -17,10 +17,13 @@ parser.add_argument('--temp-min', type=float, default=0, help='min temperature')
 parser.add_argument('--temp-max', type=float, default=188, help='max temperature')
 parser.add_argument('--threshold', type=float, default=80, help='color threshold')
 parser.add_argument('--duration', type=float, default=None, help='duration in seconds')
+parser.add_argument('--codec', type=str, default='h264', help='output codec')
 
 args = parser.parse_args()
 
 import os
+import sys
+import subprocess
 import numpy as np
 from moviepy.editor import ImageClip, TextClip, concatenate_videoclips, VideoFileClip, CompositeVideoClip
 from datetime import datetime
@@ -135,7 +138,7 @@ def make_thermal_video(thermal_dir, start_time, rgb_duration):
 
     return ret
 
-def make_flight_state_clips(log_bin, start_time, rgb_duration):
+def make_flight_state_video(log_bin, start_time, rgb_duration):
     '''make a video clip of flight state'''
     mlog = mavutil.mavlink_connection(log_bin)
     clips = []
@@ -146,6 +149,7 @@ def make_flight_state_clips(log_bin, start_time, rgb_duration):
     last_txt = 'Mode: INIT'
     bar = Bar('Processing flight log', max=100)
     pct = 0
+
     while True:
         m = mlog.recv_match(type=types)
         if m is None:
@@ -182,7 +186,33 @@ AltAGL: {TERR.CHeight:.2f}m
         if new_pct != pct:
             bar.next()
             pct = new_pct
-    return clips
+
+    video = CompositeVideoClip(clips, size=(thermal_width, thermal_height))
+    video.start_time = clips[0].start_time
+    return video
+
+def overlay_videos(rgb, thermal, flight_state, output, duration):
+    '''Call ffmpeg to concatenate the videos using the temporary file list'''
+    subprocess.run([
+        'ffmpeg',
+        '-y',
+        '-i', rgb,
+        '-i', thermal,
+        '-i', flight_state,
+        '-filter_complex',
+        'overlay=0:0,overlay=main_w-overlay_w:0',
+        '-codec', args.codec,
+        '-t', "%.2f" % duration,
+        output
+    ])
+
+    # set mtime to mtime of rgb
+    mtime = os.path.getmtime(rgb)
+    os.utime(output, (mtime, mtime))
+
+
+# get the base name of the output file for temporary files
+output_base = args.output[:-4]
 
 # get the RGB video
 base_rgb = VideoFileClip(args.rgb)
@@ -193,28 +223,23 @@ if args.duration is not None and base_rgb.duration > args.duration:
 
 print("Opened RGB video of length %.2fs" % base_rgb.duration)
 
-# make a set of text clips showing text state from bin log
-flightstate_clips = make_flight_state_clips(args.log_bin, base_rgb.start_time, base_rgb.duration)
-print("FlightState: %u clips" % len(flightstate_clips))
+# make a video of text clips showing text state from bin log
+flightstate_video = make_flight_state_video(args.log_bin, base_rgb.start_time, base_rgb.duration)
+flightstate_tmp = output_base + "_flight.mp4"
+flightstate_video.write_videofile(flightstate_tmp, fps=1, codec=args.codec)
+print("Created flight state video of length %.2fs" % flightstate_video.duration)
 
 print("making PIP thermal")
 thermal_video = make_thermal_video(args.thermal_dir, base_rgb.start_time, base_rgb.duration).set_position(("left","top"))
+thermal_tmp = output_base + "_thermal.mp4"
+thermal_video.write_videofile(thermal_tmp, fps=1, codec=args.codec)
                                  
 print("Created thermal video of length %.2fs" % thermal_video.duration)
 
 thermal_offset = thermal_video.start_time - base_rgb.start_time
-flight_offset = flightstate_clips[0].start_time - base_rgb.start_time
+flight_offset = flightstate_video.start_time - base_rgb.start_time
 print("thermal: offset=%.2fs duration=%.2f" % (thermal_offset, thermal_video.duration))
-print("flight data: offset=%.2fs len=%u" % (flight_offset, len(flightstate_clips)))
+print("flight data: offset=%.2fs duration=%.2f" % (flight_offset, flightstate_video.duration))
 
-# setup start times to sync
-thermal_video = thermal_video.set_start(thermal_offset)
-
-# create combined video
-video = CompositeVideoClip([base_rgb, thermal_video] + flightstate_clips)
-
-# and write it out
-if args.duration is not None:
-    video = video.set_duration(args.duration)
-
-video.write_videofile(args.output, fps=args.fps, codec='h264')
+print("Overlaying videos onto %s" % args.output)
+overlay_videos(args.rgb, thermal_tmp, flightstate_tmp, args.output, base_rgb.duration)
