@@ -222,7 +222,7 @@ def concatenate_videos(video_files, output_file, duration=None):
         ]
     if duration is not None:
         args += ['-t', "%.2f" % duration]
-    subprocess.run(args + output_file)
+    subprocess.run(args + [output_file])
     os.unlink(flist)
 
     # set mtime to mtime of last file, so start time can be predicted from mtime
