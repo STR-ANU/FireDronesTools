@@ -284,8 +284,32 @@ def plot_heatmap(gmap, thermal_dir, flight_pos):
     gmap.heatmap(lats, lons, weights=heat)
 
 
+def create_flight_json(flight_pos, SIYI_data):
+    '''create a flight.json file containing meta data for the flight'''
+    j = open('flight.json', 'w')
+    j.write('''
+[
+''')
+    count = flight_pos.count()
+    for idx in range(count):
+        p = flight_pos.get(idx)
+        j.write(f'''{{
+ "timestamp" : {p.timestamp},
+ "lat" : {p.lat},
+ "lon" : {p.lon}
+}}''')
+        if idx < count-1:
+            j.write(',\n')
+        else:
+            j.write('\n')
+    j.write('''
+]
+''')
+    j.close()
+
+
 apikey = get_API_key()
-gmap = gmplot.GoogleMapPlotter(-35.42274099, 149.00443460, 12, apikey=apikey, map_type='satellite')
+gmap = gmplot.GoogleMapPlotter(-35.42274099, 149.00443460, 12, apikey=apikey, map_type='satellite', title='FireMap')
 
 kml_url = "http://uav.tridgell.net/.Angel/FB810-Bullen.kml"
 
@@ -301,5 +325,22 @@ print("Loaded %u SIYI data points" % SIYI_data.count())
 plot_mission(gmap, wp)
 plot_flightpath(gmap, flight_pos)
 plot_heatmap(gmap, args.thermal_dir, flight_pos)
+
+gmap.add_custom('''
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.css" rel="stylesheet" type="text/css" />
+''',
+'''
+  <div id="timeline"></div>
+  <script src="timeline.js"></script>
+''',
+'',
+'''
+global_map = map;
+''')
+
+gmap.set_option('map_height', '90%')
+
+create_flight_json(flight_pos, SIYI_data)
 
 gmap.draw(args.output)
