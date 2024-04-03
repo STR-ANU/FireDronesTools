@@ -7,16 +7,21 @@ import argparse
 from pymavlink import mavutil, mavwp
 import numpy as np
 import math
+from pymavlink.rotmat import Matrix3, Vector3
+from MAVProxy.modules.lib import mp_util
 
 parser = argparse.ArgumentParser(description='Create thermal video')
 parser.add_argument('binlog', default=None, help='ArduPilot bin log')
 parser.add_argument('thermal_dir', default=None, help='thermal directory')
+parser.add_argument('SIYI_bin', default=None, help='SIYI bin log')
 parser.add_argument('output', default=None, help='output html')
 parser.add_argument('--min-temp', type=float, default=150.0, help='min temperature for display')
+parser.add_argument('--time-delta', type=float, default=1.0, help='time resolution')
 args = parser.parse_args()
 
 thermal_width = 640
 thermal_height = 512
+thermal_FOV = 22.8
 
 C_TO_KELVIN = 273.15
 
@@ -67,10 +72,12 @@ def plot_mission(gmap, wp):
     gmap.plot(lats, lons, color="white")
 
 class FlightPos(object):
-    def __init__(self, timestamp, lat, lon):
+    def __init__(self, timestamp, lat, lon, theight, yaw):
         self.timestamp = timestamp
         self.lat = lat
         self.lon = lon
+        self.theight = theight
+        self.yaw = yaw
 
 class FlightPositions(object):
     '''object for set of flight positions with time lookup'''
@@ -100,20 +107,130 @@ class FlightPositions(object):
             idx += 1
         return None
 
-def get_flight_positions(binlog, time_delta=1.0):
+
+class SIYIDataPoint(object):
+    def __init__(self, timestamp, SIGA, SITR, SIRF):
+        self.timestamp = timestamp
+        self.GRoll = SIGA.R
+        self.GPitch = SIGA.P
+        self.GYaw = SIGA.Y
+        self.TMax = SITR.TMax
+        self.TMin = SITR.TMin
+        self.SR = SIRF.SR
+
+class SIYIData(object):
+    '''object for querying SIYI log file by timestamp'''
+    def __init__(self, SIYI_bin):
+        self.data = []
+        self.last_timestamp = None
+        self.last_idx = None
+        mlog = mavutil.mavlink_connection(SIYI_bin)
+        last_t = None
+        while True:
+            m = mlog.recv_match(type=['SITR','SIRF','SIGA'])
+            if m is None:
+                break
+            timestamp = m._timestamp
+            timestamp -= 18*3600 # HACK!!!!
+            mtype = m.get_type()
+            if mtype == 'SIGA':
+                SITR = mlog.messages.get('SITR', None)
+                SIRF = mlog.messages.get('SIRF', None)
+                if SITR is None or SIRF is None:
+                    continue
+                if last_t is None or timestamp - last_t > args.time_delta:
+                    self.data.append(SIYIDataPoint(timestamp, m, SITR, SIRF))
+                    last_t = timestamp
+
+    def count(self):
+        return len(self.data)
+
+    def get(self, idx):
+        return self.data[idx]
+
+    def find_by_timestamp(self, timestamp):
+        if self.last_timestamp is None or timestamp < self.last_timestamp:
+            idx = 0
+        else:
+            idx = self.last_idx
+        N = self.count()
+        while idx < N:
+            if timestamp <= self.data[idx].timestamp:
+                return self.data[idx]
+            idx += 1
+        return None
+    
+def get_flight_positions(binlog):
     '''extract list of flight positions'''
     mlog = mavutil.mavlink_connection(binlog)
     last_time = None
     ret = FlightPositions()
     while True:
-        m = mlog.recv_match(type=['POS'])
+        m = mlog.recv_match(type=['POS','TERR','ATT'])
         if m is None:
             break
+        mtype = m.get_type()
+        if mtype != 'POS':
+            continue
+        TERR = mlog.messages.get('TERR',None)
+        ATT = mlog.messages.get('ATT',None)
+        if TERR is None or ATT is None:
+            continue
         timestamp = m._timestamp
-        if last_time is None or timestamp - last_time > time_delta:
-            ret.add(FlightPos(timestamp, m.Lat, m.Lng))
+        if last_time is None or timestamp - last_time > args.time_delta:
+            ret.add(FlightPos(timestamp, m.Lat, m.Lng, TERR.CHeight, ATT.Yaw))
             last_time = timestamp
     return ret
+
+def get_view_vector(fpos, siyi, x, y, FOV, aspect_ratio):
+    '''
+    get ground lat/lon given vehicle orientation, camera orientation and slant range
+    x and y are from -1 to 1, relative to center of camera view
+    positive x is to the right
+    positive y is down
+    '''
+    v = Vector3(1, 0, 0)
+    m = Matrix3()
+    (roll,pitch,yaw) = (math.radians(siyi.GRoll),math.radians(siyi.GPitch),math.radians(siyi.GYaw))
+    yaw += fpos.yaw
+    FOV_half = math.radians(0.5*FOV)
+    yaw += FOV_half*x
+    pitch -= y*FOV_half/aspect_ratio
+    m.from_euler(roll, pitch, yaw)
+    v = m * v
+    return v
+
+def get_latlon(fpos, siyi, x, y, FOV, aspect_ratio):
+    '''
+    get ground lat/lon given vehicle orientation, camera orientation and slant range
+    x and y are from -1 to 1, relative to center of camera view
+    '''
+    v = get_view_vector(fpos, siyi, x,y,FOV,aspect_ratio)
+    if v is None:
+        return None
+    v *= siyi.SR
+    (lat,lon) = (fpos.lat,fpos.lon)
+    (lat,lon) = mp_util.gps_offset(lat,lon,v.y,v.x)
+    return (lat, lon)
+
+def xy_to_latlon(fpos, siyi, x, y):
+    '''convert x,y pixel coordinates to a latlon tuple'''
+    (yres, xres, depth) = (thermal_height, thermal_width, 1)
+    x = (2 * x / float(xres)) - 1.0
+    y = (2 * y / float(yres)) - 1.0
+    aspect_ratio = float(xres) / yres
+    FOV = thermal_FOV
+    slant_range = siyi.SR
+    return get_latlon(fpos, siyi, x, y, FOV, aspect_ratio)
+
+def find_projection_by_timestamp(timestamp, x, y):
+    '''find lat/lon of a pixel in the thermal image by timestamp'''
+    fpos = flight_pos.find_by_timestamp(timestamp)
+    siyi = SIYI_data.find_by_timestamp(timestamp)
+    if fpos is None or siyi is None:
+        return None
+    latlon = xy_to_latlon(fpos, siyi, x, y)
+    return latlon
 
 def plot_flightpath(gmap, flight_pos):
     '''display mission on the map'''
@@ -158,11 +275,11 @@ def plot_heatmap(gmap, thermal_dir, flight_pos):
         if h <= 0:
             continue
         mtime = os.path.getmtime(f)
-        p = flight_pos.find_by_timestamp(mtime)
-        if p is None:
+        latlon = find_projection_by_timestamp(mtime, thermal_width//2, thermal_height//2)
+        if latlon is None:
             continue
-        lats.append(p.lat)
-        lons.append(p.lon)
+        lats.append(latlon[0])
+        lons.append(latlon[1])
         heat.append(h)
     gmap.heatmap(lats, lons, weights=heat)
 
@@ -178,6 +295,8 @@ wp = get_waypoints(args.binlog)
 print("Loaded %u waypoints" % wp.count())
 
 flight_pos = get_flight_positions(args.binlog)
+SIYI_data = SIYIData(args.SIYI_bin)
+print("Loaded %u SIYI data points" % SIYI_data.count())
 
 plot_mission(gmap, wp)
 plot_flightpath(gmap, flight_pos)
