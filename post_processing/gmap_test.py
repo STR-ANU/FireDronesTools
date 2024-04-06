@@ -9,6 +9,7 @@ import numpy as np
 import math
 from pymavlink.rotmat import Matrix3, Vector3
 from MAVProxy.modules.lib import mp_util
+from moviepy.editor import VideoFileClip
 
 parser = argparse.ArgumentParser(description='Create thermal video')
 parser.add_argument('binlog', default=None, help='ArduPilot bin log')
@@ -17,7 +18,7 @@ parser.add_argument('SIYI_bin', default=None, help='SIYI bin log')
 parser.add_argument('output', default=None, help='output html')
 parser.add_argument('--min-temp', type=float, default=150.0, help='min temperature for display')
 parser.add_argument('--time-delta', type=float, default=1.0, help='time resolution')
-parser.add_argument('--videos', nargs="+", default=[], help='video files')
+parser.add_argument('--video', type=str, action='append', default=[], help='video files')
 args = parser.parse_args()
 
 thermal_width = 640
@@ -308,6 +309,61 @@ def create_flight_json(flight_pos, SIYI_data):
 ''')
     j.close()
 
+def get_video_start_time(video):
+    '''get start time of a video file'''
+    duration = VideoFileClip(video).duration
+    mtime = os.path.getmtime(video)
+    start_time = mtime - duration
+    return start_time
+
+
+def add_videos(gmap):
+    '''add in videos to the page'''
+    print('Videos: ', args.video)
+
+    videos_json = '''video_list = [
+'''
+    for i in range(len(args.video)):
+        video = args.video[i]
+        start_time = get_video_start_time(video)
+        videos_json += f'''{{
+ "video_id" : "Video_{i}",
+ "name" : "{video}",
+ "start_time" : new Date({start_time}*1000),
+}}'''
+        if i < len(args.video)-1:
+            videos_json += ','
+        videos_json += '\n'
+    videos_json += '''
+]
+'''
+    gmap.add_custom('js', videos_json)
+
+    gmap.add_custom('html_top','''
+<div id="videoContainer">
+''')
+    for i in range(len(args.video)):
+        video = args.video[i]
+        gmap.add_custom('html_top',f'''
+    <video id="Video_{i}" width="320" height="240" controls>
+        <source src="{video}" type="video/mp4">
+    </video>
+''')
+    gmap.add_custom('html_top','''
+    <br>
+</div>
+<script>
+    function playVideo() {
+        var video = document.getElementById("RGBvideoPlayer");
+        video.play();
+    }
+
+    function seekVideo(time) {
+        var video = document.getElementById("ThermalvideoPlayer");
+        video.currentTime = time;
+    }
+</script>
+''')
 
 apikey = get_API_key()
 gmap = gmplot.GoogleMapPlotter(-35.42274099, 149.00443460, 12, apikey=apikey, map_type='satellite', title='FireMap')
@@ -349,37 +405,11 @@ gmap.add_custom('js','''
   global_map = map;
 ''')
 
-gmap.add_custom('html_top','''
-<div id="videoContainer">
-    <video id="RGBvideoPlayer" width="320" height="240" controls>
-        <source src="rgb.mp4" type="video/mp4">
-        Your browser does not support the video tag.
-    </video>
-    <video id="ThermalvideoPlayer" width="320" height="240" controls>
-        <source src="thermal.mp4" type="video/mp4">
-        Your browser does not support the video tag.
-    </video>
-    <br>
-    <button onclick="playVideo()">Play Video</button>
-    <button onclick="seekVideo(30)">Seek to 30s</button>
-</div>
-<script>
-    function playVideo() {
-        var video = document.getElementById("RGBvideoPlayer");
-        video.play();
-    }
-
-    function seekVideo(time) {
-        var video = document.getElementById("ThermalvideoPlayer");
-        video.currentTime = time;
-    }
-</script>
-''')
 
 gmap.set_option('map_height', '800px')
 
 create_flight_json(flight_pos, SIYI_data)
 
-add_videos(gmap, args.videos)
+add_videos(gmap)
 
 gmap.draw(args.output)
