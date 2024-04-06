@@ -17,6 +17,7 @@ parser.add_argument('SIYI_bin', default=None, help='SIYI bin log')
 parser.add_argument('output', default=None, help='output html')
 parser.add_argument('--min-temp', type=float, default=150.0, help='min temperature for display')
 parser.add_argument('--time-delta', type=float, default=1.0, help='time resolution')
+parser.add_argument('--videos', nargs="+", default=[], help='video files')
 args = parser.parse_args()
 
 thermal_width = 640
@@ -326,21 +327,59 @@ plot_mission(gmap, wp)
 plot_flightpath(gmap, flight_pos)
 plot_heatmap(gmap, args.thermal_dir, flight_pos)
 
-gmap.add_custom('''
+gmap.add_custom('html_head', '''
 <script src="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.js"></script>
 <link href="https://cdnjs.cloudflare.com/ajax/libs/vis/4.21.0/vis.min.css" rel="stylesheet" type="text/css" />
-''',
-'''
+<style>
+#videoContainer {
+  bottom: 1000px; /* Adjust based on your layout */
+  left: 0;
+  width: 100%;
+  background-color: #f3f3f3;
+  text-align: center;
+  z-index: 1000; /* Ensure controls are on top of the page */
+}
+</style>
+''')
+gmap.add_custom('html_top', '''
   <div id="timeline"></div>
   <script src="timeline.js"></script>
-''',
-'',
-'''
-global_map = map;
+''')
+gmap.add_custom('js','''
+  global_map = map;
 ''')
 
-gmap.set_option('map_height', '90%')
+gmap.add_custom('html_top','''
+<div id="videoContainer">
+    <video id="RGBvideoPlayer" width="320" height="240" controls>
+        <source src="rgb.mp4" type="video/mp4">
+        Your browser does not support the video tag.
+    </video>
+    <video id="ThermalvideoPlayer" width="320" height="240" controls>
+        <source src="thermal.mp4" type="video/mp4">
+        Your browser does not support the video tag.
+    </video>
+    <br>
+    <button onclick="playVideo()">Play Video</button>
+    <button onclick="seekVideo(30)">Seek to 30s</button>
+</div>
+<script>
+    function playVideo() {
+        var video = document.getElementById("RGBvideoPlayer");
+        video.play();
+    }
+
+    function seekVideo(time) {
+        var video = document.getElementById("ThermalvideoPlayer");
+        video.currentTime = time;
+    }
+</script>
+''')
+
+gmap.set_option('map_height', '800px')
 
 create_flight_json(flight_pos, SIYI_data)
+
+add_videos(gmap, args.videos)
 
 gmap.draw(args.output)
