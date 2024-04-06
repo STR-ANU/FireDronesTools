@@ -241,7 +241,7 @@ def overlay_videos(rgb, thermal, flight_state, output, duration):
         'overlay=0:0,overlay=main_w-overlay_w:0',
         '-codec', args.codec,
         '-movflags', 'faststart',
-        '-pixfmt', 'yuv420p',
+        '-pix_fmt', 'yuv420p',
         '-t', "%.2f" % duration,
         output
     ])
