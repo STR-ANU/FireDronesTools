@@ -2,8 +2,9 @@
   handling of time synch for various UI elements
   */
 
-var flight_json = null
-var vehicle_marker = null
+var flight_json = null;
+var vehicle_marker = null;
+var current_timestamp = null;
 
 // treat a map click as a warp request if below this threshold
 var map_click_dist_threshold = 25.0;
@@ -141,20 +142,44 @@ function check_video_playback() {
 	}
 
 	// copy the date first, then update
-	var timestamp = new Date(video_list[i].start_time);
-	timestamp.setSeconds(timestamp.getSeconds() + video.currentTime);
-	warp_map_to_timestamp(timestamp);
+	var js_timestamp = new Date(video_list[i].start_time);
+	js_timestamp.setSeconds(js_timestamp.getSeconds() + video.currentTime);
+	warp_map_to_timestamp(js_timestamp);
+	current_timestamp = new Date(js_timestamp);
 	break;
     }
+}
 
+/*
+  update status text with current state
+*/
+function update_status() {
+    var js_timestamp = current_timestamp;
+    var p = get_data_for_timestamp(js_timestamp);
+    var status = `
+THeight: ${p.theight.toFixed(1)} m<br>
+Yaw: ${p.yaw.toFixed(1)} degrees<br>
+VehicleLat: ${p.lat.toFixed(9)}<br>
+VehicleLon: ${p.lon.toFixed(9)}<br>
+`;
+    set_status_text(status);
+}
+
+/*
+  handle 1Hz timer update
+*/
+function handle_timer_update() {
+    check_video_playback();
+    update_status();
 }
 
 /*
   handle a click on the timeline bar
   */
-function handle_timeline_click(timestamp) {
-    warp_map_to_timestamp(timestamp);
-    warp_videos_to_timestamp(timestamp);
+function handle_timeline_click(js_timestamp) {
+    current_timestamp = new Date(js_timestamp);
+    warp_map_to_timestamp(js_timestamp);
+    warp_videos_to_timestamp(js_timestamp);
 }
 
 /*
@@ -164,10 +189,17 @@ function handle_timeline_click(timestamp) {
   */
 function handle_map_click(mapsMouseEvent) {
     var latlon = mapsMouseEvent.latLng;
-    var timestamp = get_timestamp_for_latlon(latlon);
-    warp_videos_to_timestamp(timestamp);
-    warp_map_to_timestamp(timestamp);
+    var js_timestamp = get_timestamp_for_latlon(latlon);
+    current_timestamp = new Date(js_timestamp);
+    warp_videos_to_timestamp(js_timestamp);
+    warp_map_to_timestamp(js_timestamp);
 }
+
+function set_status_text(text) {
+    var status_el = document.getElementById("status_text");
+    status_el.innerHTML = text;
+}
+
 
 /*
   callback to set flight_json variable from flight.json
@@ -181,4 +213,4 @@ function set_flight_json(json) {
 fetch('flight.json').then(obj => obj.json()).then(json => set_flight_json(json));
 
 // call check_video_playback at 1Hz
-window.setInterval(function(){ check_video_playback() }, 1000);
+window.setInterval(function(){ handle_timer_update() }, 1000);

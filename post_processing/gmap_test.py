@@ -298,7 +298,9 @@ def create_flight_json(flight_pos, SIYI_data):
         j.write(f'''{{
  "timestamp" : {p.timestamp},
  "lat" : {p.lat},
- "lon" : {p.lon}
+ "lon" : {p.lon},
+ "theight" : {p.theight},
+ "yaw" : {p.yaw}
 }}''')
         if idx < count-1:
             j.write(',\n')
@@ -341,16 +343,24 @@ def add_videos(gmap):
 
     gmap.add_custom('html_top','''
 <div id="videoContainer">
+<table>
+<tr>
 ''')
     for i in range(len(args.video)):
         video = args.video[i]
         gmap.add_custom('html_top',f'''
+<td>
     <video id="Video_{i}" width="320" height="240" controls>
         <source src="{video}" type="video/mp4">
     </video>
+</td>
 ''')
     gmap.add_custom('html_top','''
-    <br>
+<td>
+<div id="status_text">Initialising</div>
+</td>
+</tr>
+</table>
 </div>
 <script>
     function playVideo() {
@@ -392,7 +402,8 @@ gmap.add_custom('html_head', '''
   left: 0;
   width: 100%;
   background-color: #f3f3f3;
-  text-align: center;
+  text-align: left;
+  vertical-align: text-top;
   z-index: 1000; /* Ensure controls are on top of the page */
 }
 </style>
