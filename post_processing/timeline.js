@@ -1,13 +1,23 @@
+/*
+  handling of time synch for various UI elements
+  */
+
 var flight_json = null
 var vehicle_marker = null
 
 // treat a map click as a warp request if below this threshold
 var map_click_dist_threshold = 25.0;
 
+/*
+  get time flight started, based on flight.json
+  */
 function get_flight_start() {
     return new Date(flight_json[0].timestamp*1000);
 }
 
+/*
+  get time flight ended, based on flight.json
+  */
 function get_flight_end() {
     return new Date(flight_json[flight_json.length-1].timestamp*1000);
 }
@@ -56,10 +66,10 @@ function get_timestamp_for_latlon(latlon) {
 }
 
 /*
-
+  warp map marker to a timestamp
   */
-function warp_map_to_timestamp(timestamp) {
-    var p = get_data_for_timestamp(timestamp);
+function warp_map_to_timestamp(js_timestamp) {
+    var p = get_data_for_timestamp(js_timestamp);
     if (!p) {
 	return;
     }
@@ -72,19 +82,20 @@ function warp_map_to_timestamp(timestamp) {
     vehicle_marker.setPosition(new google.maps.LatLng(p.lat, p.lon));
 }
 
-function warp_videos_to_timestamp(timestamp) {
+/*
+  warp playback time of videos to a js_timestamp
+  */
+function warp_videos_to_timestamp(js_timestamp) {
     for (let i = 0; i < video_list.length; i++) {
 	var video = document.getElementById(video_list[i].video_id);
-	var seek_seconds = (timestamp - video_list[i].start_time)*0.001;
+	var seek_seconds = (js_timestamp - video_list[i].start_time)*0.001;
 	video.currentTime = seek_seconds;
     }
 }
 
-function warp_to_timestamp(timestamp) {
-    warp_map_to_timestamp(timestamp);
-    warp_videos_to_timestamp(timestamp);
-}
-
+/*
+  create and display the timeline object
+  */
 function create_timeline() {
     var container = document.getElementById('timeline');
 
@@ -108,14 +119,20 @@ function create_timeline() {
 
     timeline.on('click', function (properties) {
 	var timestamp = properties.time;
-	warp_to_timestamp(timestamp);
+	handle_timeline_click(timestamp);
     });
 }
 
+/*
+  return true if a video is currently playing
+  */
 function video_is_playing(video) {
     return video.currentTime > 0 && !video.paused && !video.ended;
 }
 
+/*
+  check if we are playing a video, and if so then update map marker
+  */
 function check_video_playback() {
     for (let i = 0; i < video_list.length; i++) {
 	var video = document.getElementById(video_list[i].video_id);
@@ -132,16 +149,32 @@ function check_video_playback() {
 
 }
 
-function set_flight_json(json) {
-    flight_json = json;
-    create_timeline();
+/*
+  handle a click on the timeline bar
+  */
+function handle_timeline_click(timestamp) {
+    warp_map_to_timestamp(timestamp);
+    warp_videos_to_timestamp(timestamp);
 }
 
+/*
+  handle a click on the map. If we click within
+  map_click_dist_threshold of a path point we warp to the closest path
+  point
+  */
 function handle_map_click(mapsMouseEvent) {
     var latlon = mapsMouseEvent.latLng;
     var timestamp = get_timestamp_for_latlon(latlon);
     warp_videos_to_timestamp(timestamp);
     warp_map_to_timestamp(timestamp);
+}
+
+/*
+  callback to set flight_json variable from flight.json
+  */
+function set_flight_json(json) {
+    flight_json = json;
+    create_timeline();
 }
 
 // load flight.json
