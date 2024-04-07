@@ -5,6 +5,13 @@
 var flight_json = null;
 var vehicle_marker = null;
 var current_timestamp = null;
+var elevation_service = new google.maps.ElevationService();
+
+/*
+  Polygon objects for the projection of the thermal and RGB cameras on the map
+  */
+var thermal_viewport = null;
+var rgb_viewport = null;
 
 // treat a map click as a warp request if below this threshold
 var map_click_dist_threshold = 25.0;
@@ -151,16 +158,73 @@ function check_video_playback() {
 }
 
 /*
+  update camera viewports on map
+*/
+function update_viewports() {
+    var js_timestamp = current_timestamp;
+    var p = get_data_for_timestamp(js_timestamp);
+    var rgb_corners = get_viewport_corners(p, 88.0, 2560.0/1440.0)
+    if (rgb_viewport == null) {
+	rgb_viewport = new google.maps.Polygon({
+	    paths: rgb_corners,
+	    strokeColor: '#0000E0',
+	    strokeOpacity: 0.8,
+	    strokeWeight: 2,
+	    fillColor: '#0000E0',
+	    fillOpacity: 0.2
+	});
+	rgb_viewport.setMap(global_map);
+    } else {
+	rgb_viewport.setPaths(rgb_corners);
+    }
+    var thermal_corners = get_viewport_corners(p, 22.8, 640.0/512.0)
+    if (thermal_viewport == null) {
+	thermal_viewport = new google.maps.Polygon({
+	    paths: thermal_corners,
+	    strokeColor: '#00E000',
+	    strokeOpacity: 0.8,
+	    strokeWeight: 2,
+	    fillColor: '#00E000',
+	    fillOpacity: 0.2
+	});
+	thermal_viewport.setMap(global_map);
+    } else {
+	thermal_viewport.setPaths(thermal_corners);
+    }
+}
+
+
+/*
   update status text with current state
 */
 function update_status() {
     var js_timestamp = current_timestamp;
     var p = get_data_for_timestamp(js_timestamp);
     var status = `
+<table>
+<tr>
+<td>
+<H2>Vehicle</h2>
 THeight: ${p.theight.toFixed(1)} m<br>
 Yaw: ${p.yaw.toFixed(1)} degrees<br>
-VehicleLat: ${p.lat.toFixed(9)}<br>
-VehicleLon: ${p.lon.toFixed(9)}<br>
+Lat: ${p.lat.toFixed(9)}<br>
+Lon: ${p.lon.toFixed(9)}
+</td>
+<td>
+<h2>Gimbal</h2>
+Roll: ${p.GRoll.toFixed(1)} degrees<br>
+Pitch: ${p.GPitch.toFixed(1)} degrees<br>
+Yaw: ${p.GYaw.toFixed(1)} degrees<br>
+SlantRange: ${p.SR.toFixed(1)}
+</td>
+<tr>
+<td>
+<h2>Thermal</h2>
+TMin: ${p.TMin.toFixed(1)}<br>
+TMax: ${p.TMax.toFixed(1)}<br>
+</td>
+</tr>
+</table>
 `;
     set_status_text(status);
 }
@@ -171,6 +235,7 @@ VehicleLon: ${p.lon.toFixed(9)}<br>
 function handle_timer_update() {
     check_video_playback();
     update_status();
+    update_viewports();
 }
 
 /*

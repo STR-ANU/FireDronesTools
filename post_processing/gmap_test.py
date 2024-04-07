@@ -14,7 +14,6 @@ from moviepy.editor import VideoFileClip
 parser = argparse.ArgumentParser(description='Create thermal video')
 parser.add_argument('binlog', default=None, help='ArduPilot bin log')
 parser.add_argument('thermal_dir', default=None, help='thermal directory')
-parser.add_argument('SIYI_bin', default=None, help='SIYI bin log')
 parser.add_argument('output', default=None, help='output html')
 parser.add_argument('--min-temp', type=float, default=150.0, help='min temperature for display')
 parser.add_argument('--time-delta', type=float, default=1.0, help='time resolution')
@@ -74,12 +73,18 @@ def plot_mission(gmap, wp):
     gmap.plot(lats, lons, color="white")
 
 class FlightPos(object):
-    def __init__(self, timestamp, lat, lon, theight, yaw):
+    def __init__(self, timestamp, lat, lon, theight, yaw, SIGA, SITR, SIRF):
         self.timestamp = timestamp
         self.lat = lat
         self.lon = lon
         self.theight = theight
         self.yaw = yaw
+        self.GRoll = SIGA.R
+        self.GPitch = SIGA.P
+        self.GYaw = SIGA.Y
+        self.SR = SIRF.SR
+        self.TMin = SITR.TMin
+        self.TMax = SITR.TMax
 
 class FlightPositions(object):
     '''object for set of flight positions with time lookup'''
@@ -110,65 +115,13 @@ class FlightPositions(object):
         return None
 
 
-class SIYIDataPoint(object):
-    def __init__(self, timestamp, SIGA, SITR, SIRF):
-        self.timestamp = timestamp
-        self.GRoll = SIGA.R
-        self.GPitch = SIGA.P
-        self.GYaw = SIGA.Y
-        self.TMax = SITR.TMax
-        self.TMin = SITR.TMin
-        self.SR = SIRF.SR
-
-class SIYIData(object):
-    '''object for querying SIYI log file by timestamp'''
-    def __init__(self, SIYI_bin):
-        self.data = []
-        self.last_timestamp = None
-        self.last_idx = None
-        mlog = mavutil.mavlink_connection(SIYI_bin)
-        last_t = None
-        while True:
-            m = mlog.recv_match(type=['SITR','SIRF','SIGA'])
-            if m is None:
-                break
-            timestamp = m._timestamp
-            timestamp -= 18*3600 # HACK!!!!
-            mtype = m.get_type()
-            if mtype == 'SIGA':
-                SITR = mlog.messages.get('SITR', None)
-                SIRF = mlog.messages.get('SIRF', None)
-                if SITR is None or SIRF is None:
-                    continue
-                if last_t is None or timestamp - last_t > args.time_delta:
-                    self.data.append(SIYIDataPoint(timestamp, m, SITR, SIRF))
-                    last_t = timestamp
-
-    def count(self):
-        return len(self.data)
-
-    def get(self, idx):
-        return self.data[idx]
-
-    def find_by_timestamp(self, timestamp):
-        if self.last_timestamp is None or timestamp < self.last_timestamp:
-            idx = 0
-        else:
-            idx = self.last_idx
-        N = self.count()
-        while idx < N:
-            if timestamp <= self.data[idx].timestamp:
-                return self.data[idx]
-            idx += 1
-        return None
-    
 def get_flight_positions(binlog):
     '''extract list of flight positions'''
     mlog = mavutil.mavlink_connection(binlog)
     last_time = None
     ret = FlightPositions()
     while True:
-        m = mlog.recv_match(type=['POS','TERR','ATT'])
+        m = mlog.recv_match(type=['POS','TERR','ATT','SIGA','SIRF','SITR'])
         if m is None:
             break
         mtype = m.get_type()
@@ -178,13 +131,18 @@ def get_flight_positions(binlog):
         ATT = mlog.messages.get('ATT',None)
         if TERR is None or ATT is None:
             continue
+        SIRF = mlog.messages.get('SIRF', None)
+        SITR = mlog.messages.get('SITR', None)
+        SIGA = mlog.messages.get('SIGA', None)
+        if SIRF is None or SITR is None or SIGA is None:
+            continue
         timestamp = m._timestamp
         if last_time is None or timestamp - last_time > args.time_delta:
-            ret.add(FlightPos(timestamp, m.Lat, m.Lng, TERR.CHeight, ATT.Yaw))
+            ret.add(FlightPos(timestamp, m.Lat, m.Lng, TERR.CHeight, ATT.Yaw, SIGA, SITR, SIRF))
             last_time = timestamp
     return ret
 
-def get_view_vector(fpos, siyi, x, y, FOV, aspect_ratio):
+def get_view_vector(fpos, x, y, FOV, aspect_ratio):
     '''
     get ground lat/lon given vehicle orientation, camera orientation and slant range
     x and y are from -1 to 1, relative to center of camera view
@@ -193,7 +151,7 @@ def get_view_vector(fpos, siyi, x, y, FOV, aspect_ratio):
     '''
     v = Vector3(1, 0, 0)
     m = Matrix3()
-    (roll,pitch,yaw) = (math.radians(siyi.GRoll),math.radians(siyi.GPitch),math.radians(siyi.GYaw))
+    (roll,pitch,yaw) = (math.radians(fpos.GRoll),math.radians(fpos.GPitch),math.radians(fpos.GYaw))
     yaw += fpos.yaw
     FOV_half = math.radians(0.5*FOV)
     yaw += FOV_half*x
@@ -202,36 +160,35 @@ def get_view_vector(fpos, siyi, x, y, FOV, aspect_ratio):
     v = m * v
     return v
 
-def get_latlon(fpos, siyi, x, y, FOV, aspect_ratio):
+def get_latlon(fpos, x, y, FOV, aspect_ratio):
     '''
     get ground lat/lon given vehicle orientation, camera orientation and slant range
     x and y are from -1 to 1, relative to center of camera view
     '''
-    v = get_view_vector(fpos, siyi, x,y,FOV,aspect_ratio)
+    v = get_view_vector(fpos, x,y,FOV,aspect_ratio)
     if v is None:
         return None
-    v *= siyi.SR
+    v *= fpos.SR
     (lat,lon) = (fpos.lat,fpos.lon)
     (lat,lon) = mp_util.gps_offset(lat,lon,v.y,v.x)
     return (lat, lon)
 
-def xy_to_latlon(fpos, siyi, x, y):
+def xy_to_latlon(fpos, x, y):
     '''convert x,y pixel coordinates to a latlon tuple'''
     (yres, xres, depth) = (thermal_height, thermal_width, 1)
     x = (2 * x / float(xres)) - 1.0
     y = (2 * y / float(yres)) - 1.0
     aspect_ratio = float(xres) / yres
     FOV = thermal_FOV
-    slant_range = siyi.SR
-    return get_latlon(fpos, siyi, x, y, FOV, aspect_ratio)
+    slant_range = fpos.SR
+    return get_latlon(fpos, x, y, FOV, aspect_ratio)
 
 def find_projection_by_timestamp(timestamp, x, y):
     '''find lat/lon of a pixel in the thermal image by timestamp'''
     fpos = flight_pos.find_by_timestamp(timestamp)
-    siyi = SIYI_data.find_by_timestamp(timestamp)
-    if fpos is None or siyi is None:
+    if fpos is None:
         return None
-    latlon = xy_to_latlon(fpos, siyi, x, y)
+    latlon = xy_to_latlon(fpos, x, y)
     return latlon
 
 def plot_flightpath(gmap, flight_pos):
@@ -286,7 +243,7 @@ def plot_heatmap(gmap, thermal_dir, flight_pos):
     gmap.heatmap(lats, lons, weights=heat)
 
 
-def create_flight_json(flight_pos, SIYI_data):
+def create_flight_json(flight_pos):
     '''create a flight.json file containing meta data for the flight'''
     j = open('flight.json', 'w')
     j.write('''
@@ -300,7 +257,13 @@ def create_flight_json(flight_pos, SIYI_data):
  "lat" : {p.lat},
  "lon" : {p.lon},
  "theight" : {p.theight},
- "yaw" : {p.yaw}
+ "yaw" : {p.yaw},
+ "GRoll" : {p.GRoll},
+ "GPitch" : {p.GPitch},
+ "GYaw" : {p.GYaw},
+ "SR" : {p.SR},
+ "TMin" : {p.TMin},
+ "TMax" : {p.TMax}
 }}''')
         if idx < count-1:
             j.write(',\n')
@@ -386,8 +349,6 @@ wp = get_waypoints(args.binlog)
 print("Loaded %u waypoints" % wp.count())
 
 flight_pos = get_flight_positions(args.binlog)
-SIYI_data = SIYIData(args.SIYI_bin)
-print("Loaded %u SIYI data points" % SIYI_data.count())
 
 plot_mission(gmap, wp)
 plot_flightpath(gmap, flight_pos)
@@ -410,6 +371,8 @@ gmap.add_custom('html_head', '''
 ''')
 gmap.add_custom('html_top', '''
   <div id="timeline"></div>
+  <script src="rotmat.js"></script>
+  <script src="projection.js"></script>
   <script src="timeline.js"></script>
 ''')
 gmap.add_custom('js','''
@@ -423,7 +386,7 @@ gmap.add_custom('js','''
 
 gmap.set_option('map_height', '800px')
 
-create_flight_json(flight_pos, SIYI_data)
+create_flight_json(flight_pos)
 
 add_videos(gmap)
 
