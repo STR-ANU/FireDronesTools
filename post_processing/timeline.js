@@ -1,6 +1,9 @@
 var flight_json = null
 var vehicle_marker = null
 
+// treat a map click as a warp request if below this threshold
+var map_click_dist_threshold = 25.0;
+
 function get_flight_start() {
     return new Date(flight_json[0].timestamp*1000);
 }
@@ -9,7 +12,10 @@ function get_flight_end() {
     return new Date(flight_json[flight_json.length-1].timestamp*1000);
 }
 
-function get_data_for_timestamp(timestamp) {
+/*
+  get flight json record for a given timestamp, takes a Date object
+*/
+function get_data_for_timestamp(js_timestamp) {
     if (!flight_json) {
 	return null;
     }
@@ -18,7 +24,7 @@ function get_data_for_timestamp(timestamp) {
     while (idx_low < idx_high) {
 	var mid = Math.floor((idx_low + idx_high) / 2);
 	var tsdate = new Date(flight_json[mid].timestamp*1000);
-	if (tsdate < timestamp) {
+	if (tsdate < js_timestamp) {
 	    idx_low = mid+1;
 	} else {
 	    idx_high = mid;
@@ -27,6 +33,31 @@ function get_data_for_timestamp(timestamp) {
     return flight_json[idx_low];
 }
 
+/*
+  find the timestamp closest to the given latlon, returns a js Date object
+*/
+function get_timestamp_for_latlon(latlon) {
+    if (!flight_json) {
+	return null;
+    }
+    var smallest_distance = null;
+    var smallest_timestamp = null;
+    for (let i=0; i<flight_json.length; i++) {
+	var dist = google.maps.geometry.spherical.computeDistanceBetween(latlon, new google.maps.LatLng(flight_json[i].lat, flight_json[i].lon));
+	if (dist < map_click_dist_threshold && smallest_distance == null || dist < smallest_distance) {
+	    smallest_distance = dist;
+	    smallest_timestamp = flight_json[i].timestamp;
+	}
+    }
+    if (smallest_timestamp == null) {
+	return null;
+    }
+    return new Date(smallest_timestamp*1000);
+}
+
+/*
+
+  */
 function warp_map_to_timestamp(timestamp) {
     var p = get_data_for_timestamp(timestamp);
     if (!p) {
@@ -92,6 +123,7 @@ function check_video_playback() {
 	    continue;
 	}
 
+	// copy the date first, then update
 	var timestamp = new Date(video_list[i].start_time);
 	timestamp.setSeconds(timestamp.getSeconds() + video.currentTime);
 	warp_map_to_timestamp(timestamp);
@@ -103,6 +135,13 @@ function check_video_playback() {
 function set_flight_json(json) {
     flight_json = json;
     create_timeline();
+}
+
+function handle_map_click(mapsMouseEvent) {
+    var latlon = mapsMouseEvent.latLng;
+    var timestamp = get_timestamp_for_latlon(latlon);
+    warp_videos_to_timestamp(timestamp);
+    warp_map_to_timestamp(timestamp);
 }
 
 // load flight.json

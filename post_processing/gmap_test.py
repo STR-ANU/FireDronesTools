@@ -403,6 +403,10 @@ gmap.add_custom('html_top', '''
 ''')
 gmap.add_custom('js','''
   global_map = map;
+
+  map.addListener("click", (mapsMouseEvent) => {
+    handle_map_click(mapsMouseEvent);
+  });
 ''')
 
 
