@@ -212,17 +212,19 @@ def concatenate_videos(video_files, output_file, duration=None):
     f.close()
 
     # Call ffmpeg to concatenate the videos using the temporary file list
-    args = [
+    argsc = [
         'ffmpeg',
         '-y',
         '-f', 'concat',
         '-safe', '0',
         '-i', flist,
-        '-c', 'copy',
+        '-c', args.codec,
+        '-movflags', 'faststart',
+        '-pix_fmt', 'yuv420p',
         ]
     if duration is not None:
-        args += ['-t', "%.2f" % duration]
-    subprocess.run(args + [output_file])
+        argsc += ['-t', "%.2f" % duration]
+    subprocess.run(argsc + [output_file])
     os.unlink(flist)
 
     # set mtime to mtime of last file, so start time can be predicted from mtime
@@ -291,7 +293,8 @@ print("Created flight state video of length %.2fs" % flightstate_video.duration)
 print("making PIP thermal")
 thermal_video = make_thermal_video(os.path.join(args.flight_dir,THERMAL_DIR), base_rgb.start_time, base_rgb.duration).set_position(("left","top"))
 thermal_tmp = output_base + "_thermal_tmp.mp4"
-thermal_video.write_videofile(thermal_tmp, fps=1, codec=args.codec)
+ffmpeg_parm = [ '-movflags', 'faststart', '-pix_fmt', 'yuv420p' ]
+thermal_video.write_videofile(thermal_tmp, fps=1, codec=args.codec, ffmpeg_params=ffmpeg_parm)
 thermal_end_time = thermal_video.start_time + thermal_video.duration
 os.utime(thermal_tmp, (thermal_end_time, thermal_end_time))
                                  
