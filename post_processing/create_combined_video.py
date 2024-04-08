@@ -245,6 +245,8 @@ def overlay_videos(rgb, thermal, flight_state, output, duration):
         '-t', "%.2f" % duration,
         output
     ])
+    mtime = os.path.getmtime(rgb)
+    os.utime(output, (mtime, mtime))
 
 def make_rbg_video():
     '''make the rgb video concatenating all RGB videos'''
@@ -282,12 +284,16 @@ print("Opened RGB video of length %.2fs" % base_rgb.duration)
 flightstate_video = make_flight_state_video(os.path.join(args.flight_dir, LOG_NAME), base_rgb.start_time, base_rgb.duration)
 flightstate_tmp = output_base + "_flight_tmp.mp4"
 flightstate_video.write_videofile(flightstate_tmp, fps=1, codec=args.codec)
+flightstate_end_time = flightstate_video.start_time + flightstate_video.duration
+os.utime(flightstate_tmp, (flightstate_end_time, flightstate_end_time))
 print("Created flight state video of length %.2fs" % flightstate_video.duration)
 
 print("making PIP thermal")
 thermal_video = make_thermal_video(os.path.join(args.flight_dir,THERMAL_DIR), base_rgb.start_time, base_rgb.duration).set_position(("left","top"))
 thermal_tmp = output_base + "_thermal_tmp.mp4"
 thermal_video.write_videofile(thermal_tmp, fps=1, codec=args.codec)
+thermal_end_time = thermal_video.start_time + thermal_video.duration
+os.utime(thermal_tmp, (thermal_end_time, thermal_end_time))
                                  
 print("Created thermal video of length %.2fs" % thermal_video.duration)
 
