@@ -1,0 +1,19 @@
+certifi==2024.2.2
+charset-normalizer==3.3.2
+decorator==4.4.2
+future==1.0.0
+gmplot @ git+https://github.com/tridge/gmplot.git@e52384c00331024c82e9b7f950635653bd5537ff
+idna==3.7
+imageio==2.34.1
+imageio-ffmpeg==0.4.9
+lxml==5.2.1
+MAVProxy==1.8.70
+moviepy==1.0.3
+numpy==1.26.4
+pillow==10.3.0
+proglog==0.1.10
+pymavlink==2.4.41
+pyserial==3.5
+requests==2.31.0
+tqdm==4.66.2
+urllib3==2.2.1
